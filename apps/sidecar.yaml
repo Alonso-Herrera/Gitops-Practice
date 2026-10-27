@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-con-sidecar-real
+  namespace: default
+  labels:
+    app: api-logs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-logs
+  template:
+    metadata:
+      labels:
+        app: api-logs
+    spec:
+      containers:
+      - name: api-node
+        image: node:18-alpine
+        command: ["sh", "-c"]
+        args:
+          - |
+            npm install express morgan;
+            cat << 'EOF' > server.js
+            const express = require('express');
+            const fs = require('fs');
+            const morgan = require('morgan');
+            const app = express();
+            const accessLogStream = fs.createWriteStream('/var/log/api/access.log', { flags: 'a' });
+            app.use(morgan('combined', { stream: accessLogStream }));
+            app.get('/', (req, res) => res.send({ status: 'OK', message: 'API funcionando' }));
+            app.get('/users', (req, res) => res.send([{ id: 1, name: 'Alonso' }]));
+            app.get('/error', (req, res) => { res.status(500).send({ error: 'Fallo interno simulado' }); });
+            app.listen(3000, () => console.log('Servidor Node listo en puerto 3000'));
+            const endpoints = ['/', '/users', '/error', '/not-found'];
+            setInterval(() => {
+              const path = endpoints[Math.floor(Math.random() * endpoints.length)];
+              require('http').get(`http://localhost:3000${path}`, () => {}).on('error', () => {});
+            }, 2000);
+            EOF
+            node server.js
+        volumeMounts:
+        - name: directorio-logs
+          mountPath: /var/log/api
+
+      - name: agente-sidecar
+        image: alpine:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "[Sidecar] Esperando a que la API empiece a registrar tráfico..."
+            sleep 5
+            echo "[Sidecar] Iniciando análisis y filtrado de logs en tiempo real:"
+            tail -f /var/log/api/access.log | while read -r line; do
+              if echo "$line" | grep -q " 500 "; then
+                echo "🚨 [ALERTA CRÍTICA] Se detectó un error 500 en la API: \$line"
+              elif echo "$line" | grep -q " 404 "; then
+                echo "⚠️ [ADVERTENCIA] Ruta no encontrada: \$line"
+              else
+                echo "ℹ️ [TRAFICO HTTP] \$line"
+              fi
+            done
+        volumeMounts:
+        - name: directorio-logs
+          mountPath: /var/log/api
+
+      volumes:
+      - name: directorio-logs
+        emptyDir: {}
+
