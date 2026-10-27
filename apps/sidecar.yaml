@@ -27,7 +27,7 @@ spec:
           mountPath: /usr/share/nginx/html/dashboard
 
       - name: sidecar-recolector
-        image: goaccess/goaccess:latest
+        image: allinurl/goaccess:latest
         args: ["--log-file=/var/log/nginx/access.log", "--log-format=COMBINED", "--real-time-html", "--output=/html/index.html"]
         volumeMounts:
         - name: compartido-logs
